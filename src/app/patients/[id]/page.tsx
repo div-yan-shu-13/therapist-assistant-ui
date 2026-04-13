@@ -11,22 +11,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { ThemeToggle } from "@/components/theme-toggle"
+import { ApiStatus } from "@/components/api-status"
 import {
   Brain, Users, ChevronLeft, Send, Loader2,
   AlertTriangle, ShieldCheck, Info, Check, X,
   Calendar, Repeat, Shield, Clock, Trash2,
 } from "lucide-react"
 import Link from "next/link"
-
-// ─── Mock patient (replace with DB fetch later) ───────────────────────────────
-
-const MOCK_PATIENT = {
-  id:           "p1",
-  display_name: "Patient A",
-  notes:        "27F, referred for anxiety and depressive episodes.",
-  created_at:   "2026-01-10T09:00:00Z",
-  last_session: "2026-04-12T14:30:00Z",
-}
+import { usePatientsStore } from "@/store/patients"
+import { notFound } from "next/navigation"
 
 // ─── Icon map for memory types ────────────────────────────────────────────────
 
@@ -471,7 +464,9 @@ export default function PatientWorkspacePage({
 }: {
   params: Promise<{ id: string }>
 }) {
-  const { id } = use(params)
+  const { id }      = use(params)
+  const getPatient  = usePatientsStore((s) => s.getPatient)
+  const patient     = getPatient(id)
 
   const {
     inputText,
@@ -491,6 +486,23 @@ export default function PatientWorkspacePage({
     resetWorkspace()
     textareaRef.current?.focus()
   }, [id])
+
+  // Patient not found — could show 404 or redirect
+  if (!patient) {
+    return (
+      <div className="min-h-dvh flex items-center justify-center bg-[var(--color-bg)]">
+        <div className="text-center space-y-3">
+          <p className="text-sm font-medium text-[var(--color-text-muted)]">Patient not found</p>
+          <Link
+            href="/"
+            className="text-xs text-[var(--color-primary)] hover:underline"
+          >
+            ← Back to dashboard
+          </Link>
+        </div>
+      </div>
+    )
+  }
 
   const hasPendingMemories = memoryCandidates.length > 0
 
@@ -516,18 +528,19 @@ export default function PatientWorkspacePage({
               </div>
               <span className="text-xs font-semibold tracking-tight">Therapist Assistant</span>
             </div>
+            <ApiStatus />
             <ThemeToggle />
           </div>
 
           {/* Patient info */}
           <div className="px-4 py-4 border-b border-[var(--color-divider)]">
             <div className="w-10 h-10 rounded-full bg-[var(--color-primary-subtle)] flex items-center justify-center text-sm font-semibold text-[var(--color-primary)] mb-3">
-              {MOCK_PATIENT.display_name.split(" ")[1]}
+              {patient.display_name.split(" ")[1]}
             </div>
-            <p className="text-sm font-semibold">{MOCK_PATIENT.display_name}</p>
-            {MOCK_PATIENT.notes && (
+            <p className="text-sm font-semibold">{patient.display_name}</p>
+            {patient.notes && (
               <p className="text-xs text-[var(--color-text-muted)] mt-1 leading-relaxed">
-                {MOCK_PATIENT.notes}
+                {patient.notes}
               </p>
             )}
             <div className="flex items-center gap-1.5 mt-3">
@@ -565,7 +578,7 @@ export default function PatientWorkspacePage({
           {/* Workspace header */}
           <div className="px-5 py-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] flex items-center justify-between shrink-0">
             <div>
-              <p className="text-sm font-semibold">{MOCK_PATIENT.display_name}</p>
+              <p className="text-sm font-semibold">{patient.display_name}</p>
               <p className="text-xs text-[var(--color-text-muted)]">Session workspace</p>
             </div>
             {analysisResult && (
@@ -585,7 +598,7 @@ export default function PatientWorkspacePage({
             <textarea
               ref={textareaRef}
               className="w-full h-full min-h-[300px] resize-none bg-transparent text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:outline-none leading-relaxed"
-              placeholder={`Paste a session note, message, or journal entry for ${MOCK_PATIENT.display_name}...\n\nPress ⌘ + Enter to analyze.`}
+              placeholder={`Paste a session note, message, or journal entry for ${patient.display_name}...\n\nPress ⌘ + Enter to analyze.`}
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={(e) => {

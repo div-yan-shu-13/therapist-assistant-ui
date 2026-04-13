@@ -1,157 +1,177 @@
-import type {
-  AnalyzeRequest,
-  AnalysisResult,
-  MemoryRequest,
-  MemoryResponse,
-  HealthResponse,
-} from "@/types"
+// ─── Constants ────────────────────────────────────────────────────────────────
 
-// ─── Base config ──────────────────────────────────────────────────────────────
+const BASE_URL     = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
+const TIMEOUT_MS   = 30_000   // 30s — model inference can be slow on first run
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
-// ─── Error types ──────────────────────────────────────────────────────────────
+async function apiFetch<T>(
+  path:    string,
+  options: RequestInit = {}
+): Promise<T> {
+  const controller = new AbortController()
+  const timer      = setTimeout(() => controller.abort(), TIMEOUT_MS)
+
+  try {
+    const res = await fetch(`${BASE_URL}${path}`, {
+      headers: { "Content-Type": "application/json" },
+      signal:  controller.signal,
+      ...options,
+    })
+
+    if (!res.ok) {
+      let message = `HTTP ${res.status}`
+      try {
+        const body = await res.json()
+        message = body?.detail ?? body?.error ?? message
+      } catch {
+        // body wasn't JSON — keep the status message
+      }
+      throw new ApiError(message, res.status)
+    }
+
+    return res.json() as Promise<T>
+  } catch (err) {
+    if (err instanceof ApiError) throw err
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new ApiError("Request timed out. The model may still be loading.", 408)
+    }
+    throw new ApiError(
+      err instanceof Error ? err.message : "Network error",
+      0
+    )
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 export class ApiError extends Error {
   constructor(
-    public status: number,
-    public detail: string,
-    message?: string
+    message: string,
+    public readonly status: number
   ) {
-    super(message ?? detail)
+    super(message)
     this.name = "ApiError"
   }
 }
 
-export class ModelNotLoadedError extends ApiError {
-  constructor() {
-    super(503, "Model is not loaded", "The analysis model is not ready. Please try again shortly.")
-    this.name = "ModelNotLoadedError"
-  }
+export function getErrorMessage(err: unknown): string {
+  if (err instanceof ApiError) return err.message
+  if (err instanceof Error)    return err.message
+  return "An unexpected error occurred."
 }
 
-export class NetworkError extends Error {
-  constructor() {
-    super("Could not reach the analysis server. Make sure it is running on port 8000.")
-    this.name = "NetworkError"
-  }
+// ─── Types (mirror app/schemas.py exactly) ────────────────────────────────────
+
+export type RiskTier      = "Low" | "Moderate" | "High" | "Crisis"
+export type ContextLabel  = "self-directed" | "third-person" | "support-seeking" | "ambiguous"
+export type ConfidenceLevel = "strong" | "medium" | "cautious"
+export type MemoryType    = "life_event" | "relationship" | "recurring_theme" | "protective_factor"
+export type InputMode     = "paste" | "chat"
+
+export interface EvidenceSpan {
+  text:       string
+  label:      string
+  score:      number
+  start_idx:  number | null
+  end_idx:    number | null
 }
 
-// ─── Core fetch wrapper ───────────────────────────────────────────────────────
-
-async function apiFetch<T>(
-  path: string,
-  options?: RequestInit
-): Promise<T> {
-  let response: Response
-
-  try {
-    response = await fetch(`${BASE_URL}${path}`, {
-      headers: { "Content-Type": "application/json" },
-      // Next.js 15 — no-store by default, explicit here for clarity
-      cache: "no-store",
-      ...options,
-    })
-  } catch {
-    // fetch() itself threw — server is unreachable
-    throw new NetworkError()
-  }
-
-  if (!response.ok) {
-    let detail = `Request failed with status ${response.status}`
-
-    try {
-      const body = await response.json()
-      detail = body.detail ?? body.error ?? detail
-    } catch {
-      // response body wasn't JSON — use the default detail
-    }
-
-    if (response.status === 503) throw new ModelNotLoadedError()
-
-    throw new ApiError(response.status, detail)
-  }
-
-  return response.json() as Promise<T>
+export interface MemoryCandidate {
+  type:        MemoryType
+  title:       string
+  description: string
+  confidence:  number
 }
 
-// ─── Endpoints ────────────────────────────────────────────────────────────────
+// ─── /analyze ─────────────────────────────────────────────────────────────────
 
-/**
- * Check if the FastAPI service and model are ready.
- */
+export interface AnalyzeRequest {
+  text:       string
+  patient_id?: string
+  mode?:      InputMode
+}
+
+export interface AnalyzeResponse {
+  risk_tier:      RiskTier
+  context_label:  ContextLabel
+  signal_labels:  string[]
+  confidence:     ConfidenceLevel
+  summary:        string
+  evidence_spans: EvidenceSpan[]
+  raw_class:      string
+  raw_score:      number
+}
+
+export async function analyzeText(req: AnalyzeRequest): Promise<AnalyzeResponse> {
+  return apiFetch<AnalyzeResponse>("/analyze", {
+    method: "POST",
+    body:   JSON.stringify({
+      text:       req.text,
+      patient_id: req.patient_id ?? null,
+      mode:       req.mode ?? "paste",
+    }),
+  })
+}
+
+// ─── /extract-memory ──────────────────────────────────────────────────────────
+
+export interface MemoryRequest {
+  text:       string
+  patient_id?: string
+}
+
+export interface MemoryResponse {
+  candidates: MemoryCandidate[]
+  count:      number
+}
+
+export async function extractMemory(req: MemoryRequest): Promise<MemoryResponse> {
+  return apiFetch<MemoryResponse>("/extract-memory", {
+    method: "POST",
+    body:   JSON.stringify({
+      text:       req.text,
+      patient_id: req.patient_id ?? null,
+    }),
+  })
+}
+
+// ─── /health ──────────────────────────────────────────────────────────────────
+
+export interface HealthResponse {
+  status:       string
+  model_loaded: boolean
+  version:      string
+}
+
 export async function checkHealth(): Promise<HealthResponse> {
   return apiFetch<HealthResponse>("/health")
 }
 
-/**
- * Analyze patient text for risk tier, context, signals, and evidence spans.
- */
-export async function analyzeText(
-  request: AnalyzeRequest
-): Promise<AnalysisResult> {
-  return apiFetch<AnalysisResult>("/analyze", {
-    method: "POST",
-    body: JSON.stringify(request),
-  })
-}
-
-/**
- * Extract structured memory candidates from patient text.
- * Returns candidates for therapist review — nothing is saved automatically.
- */
-export async function extractMemory(
-  request: MemoryRequest
-): Promise<MemoryResponse> {
-  return apiFetch<MemoryResponse>("/extract-memory", {
-    method: "POST",
-    body: JSON.stringify(request),
-  })
-}
-
-// ─── Combined call ────────────────────────────────────────────────────────────
-// Runs analyze + extract-memory in parallel since both are independent.
-// This is the main call the workspace makes on every submission.
-
-export interface FullAnalysisResult {
-  analysis: AnalysisResult
-  memory: MemoryResponse
-}
+// ─── runFullAnalysis — called by the workspace store ──────────────────────────
+// Fires both endpoints in parallel. Memory extraction is best-effort:
+// if it fails (e.g. model returned nothing), we return empty candidates
+// rather than failing the whole analysis.
 
 export async function runFullAnalysis(
-  text: string,
-  patientId?: string
-): Promise<FullAnalysisResult> {
-  const [analysis, memory] = await Promise.all([
-    analyzeText({
-      text,
-      patient_id: patientId,
-      mode: "paste",
-    }),
-    extractMemory({
-      text,
-      patient_id: patientId,
-    }),
+  text:       string,
+  patient_id?: string
+): Promise<{ analysis: AnalyzeResponse; memory: MemoryResponse }> {
+  const [analysis, memory] = await Promise.allSettled([
+    analyzeText({ text, patient_id, mode: "paste" }),
+    extractMemory({ text, patient_id }),
   ])
 
-  return { analysis, memory }
-}
+  if (analysis.status === "rejected") {
+    // Re-throw the analysis error — it's the primary call
+    throw analysis.reason
+  }
 
-// ─── Error message helper ─────────────────────────────────────────────────────
-// Converts any thrown error into a clean string for the UI.
-
-export function getErrorMessage(error: unknown): string {
-  if (error instanceof ModelNotLoadedError) {
-    return "The analysis model is not ready. Please check the server and try again."
+  return {
+    analysis: analysis.value,
+    memory:
+      memory.status === "fulfilled"
+        ? memory.value
+        : { candidates: [], count: 0 },
   }
-  if (error instanceof NetworkError) {
-    return "Could not reach the analysis server. Make sure it is running on port 8000."
-  }
-  if (error instanceof ApiError) {
-    return `Analysis failed: ${error.detail}`
-  }
-  if (error instanceof Error) {
-    return error.message
-  }
-  return "An unexpected error occurred."
 }
