@@ -48,8 +48,8 @@ interface WorkspaceStore {
   clearSessions: () => void
 
   // ── UI ──────────────────────────────────────────────────────────────────
-  activeTab: "analysis" | "memory" | "history"
-  setActiveTab: (tab: "analysis" | "memory" | "history") => void
+  activeTab: "analysis" | "memory" | "history" | "chat"
+  setActiveTab: (tab: "analysis" | "memory" | "history" | "chat") => void
 
   // ── Reset ───────────────────────────────────────────────────────────────
   resetWorkspace: () => void

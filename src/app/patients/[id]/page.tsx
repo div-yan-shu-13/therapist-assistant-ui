@@ -12,14 +12,15 @@ import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { ApiStatus } from "@/components/api-status"
+import { ChatPanel } from "@/components/chat-panel"
+import { ChatInsights } from "@/components/chat-insights"
 import {
   Brain, Users, ChevronLeft, Send, Loader2,
   AlertTriangle, ShieldCheck, Info, Check, X,
-  Calendar, Repeat, Shield, Clock, Trash2,
+  Calendar, Repeat, Shield, Clock, Trash2, MessageSquare,
 } from "lucide-react"
 import Link from "next/link"
 import { usePatientsStore } from "@/store/patients"
-import { notFound } from "next/navigation"
 
 // ─── Icon map for memory types ────────────────────────────────────────────────
 
@@ -484,19 +485,15 @@ export default function PatientWorkspacePage({
 
   useEffect(() => {
     resetWorkspace()
-    textareaRef.current?.focus()
+    if (activeTab !== "chat") textareaRef.current?.focus()
   }, [id])
 
-  // Patient not found — could show 404 or redirect
   if (!patient) {
     return (
       <div className="min-h-dvh flex items-center justify-center bg-[var(--color-bg)]">
         <div className="text-center space-y-3">
           <p className="text-sm font-medium text-[var(--color-text-muted)]">Patient not found</p>
-          <Link
-            href="/"
-            className="text-xs text-[var(--color-primary)] hover:underline"
-          >
+          <Link href="/" className="text-xs text-[var(--color-primary)] hover:underline">
             ← Back to dashboard
           </Link>
         </div>
@@ -505,6 +502,7 @@ export default function PatientWorkspacePage({
   }
 
   const hasPendingMemories = memoryCandidates.length > 0
+  const isChatMode         = activeTab === "chat"
 
   return (
     <TooltipProvider>
@@ -572,58 +570,63 @@ export default function PatientWorkspacePage({
           </div>
         </aside>
 
-        {/* ── Col 2: Input workspace ───────────────────────────────────── */}
+        {/* ── Col 2: Input workspace or Chat ───────────────────────────── */}
         <main className="flex flex-col overflow-hidden">
-
-          {/* Workspace header */}
-          <div className="px-5 py-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] flex items-center justify-between shrink-0">
-            <div>
-              <p className="text-sm font-semibold">{patient.display_name}</p>
-              <p className="text-xs text-[var(--color-text-muted)]">Session workspace</p>
-            </div>
-            {analysisResult && (
-              <div className={cn(
-                "text-xs font-medium px-2.5 py-1 rounded-full border",
-                RISK_TIER_CONFIG[analysisResult.risk_tier].bg,
-                RISK_TIER_CONFIG[analysisResult.risk_tier].color,
-                RISK_TIER_CONFIG[analysisResult.risk_tier].border,
-              )}>
-                {RISK_TIER_CONFIG[analysisResult.risk_tier].label}
+          {isChatMode ? (
+            <ChatPanel patientId={id} patientName={patient.display_name} />
+          ) : (
+            <>
+              {/* Workspace header */}
+              <div className="px-5 py-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] flex items-center justify-between shrink-0">
+                <div>
+                  <p className="text-sm font-semibold">{patient.display_name}</p>
+                  <p className="text-xs text-[var(--color-text-muted)]">Session workspace</p>
+                </div>
+                {analysisResult && (
+                  <div className={cn(
+                    "text-xs font-medium px-2.5 py-1 rounded-full border",
+                    RISK_TIER_CONFIG[analysisResult.risk_tier].bg,
+                    RISK_TIER_CONFIG[analysisResult.risk_tier].color,
+                    RISK_TIER_CONFIG[analysisResult.risk_tier].border,
+                  )}>
+                    {RISK_TIER_CONFIG[analysisResult.risk_tier].label}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
 
-          {/* Textarea */}
-          <div className="flex-1 overflow-y-auto custom-scrollbar px-5 py-4">
-            <textarea
-              ref={textareaRef}
-              className="w-full h-full min-h-[300px] resize-none bg-transparent text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:outline-none leading-relaxed"
-              placeholder={`Paste a session note, message, or journal entry for ${patient.display_name}...\n\nPress ⌘ + Enter to analyze.`}
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              onKeyDown={(e) => {
-                if ((e.metaKey || e.ctrlKey) && e.key === "Enter") runAnalysis()
-              }}
-            />
-          </div>
+              {/* Textarea */}
+              <div className="flex-1 overflow-y-auto custom-scrollbar px-5 py-4">
+                <textarea
+                  ref={textareaRef}
+                  className="w-full h-full min-h-[300px] resize-none bg-transparent text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:outline-none leading-relaxed"
+                  placeholder={`Paste a session note, message, or journal entry for ${patient.display_name}...\n\nPress ⌘ + Enter to analyze.`}
+                  value={inputText}
+                  onChange={(e) => setInputText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") runAnalysis()
+                  }}
+                />
+              </div>
 
-          {/* Bottom bar */}
-          <div className="px-5 py-3 border-t border-[var(--color-border)] bg-[var(--color-surface)] flex items-center justify-between shrink-0">
-            <p className="text-xs text-[var(--color-text-faint)]">
-              {wordCount(inputText)} words
-            </p>
-            <Button
-              size="sm"
-              className="gap-1.5 bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] text-white"
-              disabled={!inputText.trim() || isAnalyzing}
-              onClick={runAnalysis}
-            >
-              {isAnalyzing
-                ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Analyzing...</>
-                : <><Send className="w-3.5 h-3.5" /> Analyze</>
-              }
-            </Button>
-          </div>
+              {/* Bottom bar */}
+              <div className="px-5 py-3 border-t border-[var(--color-border)] bg-[var(--color-surface)] flex items-center justify-between shrink-0">
+                <p className="text-xs text-[var(--color-text-faint)]">
+                  {wordCount(inputText)} words
+                </p>
+                <Button
+                  size="sm"
+                  className="gap-1.5 bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] text-white"
+                  disabled={!inputText.trim() || isAnalyzing}
+                  onClick={runAnalysis}
+                >
+                  {isAnalyzing
+                    ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Analyzing...</>
+                    : <><Send className="w-3.5 h-3.5" /> Analyze</>
+                  }
+                </Button>
+              </div>
+            </>
+          )}
         </main>
 
         {/* ── Col 3: Right panel tabs ──────────────────────────────────── */}
@@ -634,7 +637,7 @@ export default function PatientWorkspacePage({
             className="flex flex-col h-full"
           >
             <div className="px-3 pt-3 border-b border-[var(--color-divider)] shrink-0">
-              <TabsList className="w-full grid grid-cols-3 h-8">
+              <TabsList className="w-full grid grid-cols-4 h-8">
                 <TabsTrigger value="analysis" className="text-xs">
                   Analysis
                 </TabsTrigger>
@@ -649,6 +652,10 @@ export default function PatientWorkspacePage({
                 <TabsTrigger value="history" className="text-xs">
                   History
                 </TabsTrigger>
+                <TabsTrigger value="chat" className="text-xs flex items-center gap-1">
+                  <MessageSquare className="w-3 h-3" />
+                  Chat
+                </TabsTrigger>
               </TabsList>
             </div>
 
@@ -661,6 +668,9 @@ export default function PatientWorkspacePage({
               </TabsContent>
               <TabsContent value="history" className="mt-0">
                 <HistoryPanel />
+              </TabsContent>
+              <TabsContent value="chat" className="mt-0 h-full">
+                <ChatInsights patientId={id} />
               </TabsContent>
             </div>
           </Tabs>
